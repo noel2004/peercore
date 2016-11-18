@@ -1,3 +1,9 @@
 [submodule "usrsctp"]
 	path = usrsctp
 	url = https://github.com/sctplab/usrsctp.git
+[submodule "vendor/usrsctp"]
+	path = vendor/usrsctp
+	url = https://github.com/sctplab/usrsctp.git
+[submodule "vendor/openssl"]
+	path = vendor/openssl
+	url = https://github.com/openssl/openssl.git
