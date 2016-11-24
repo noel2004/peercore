@@ -23,12 +23,18 @@
     <ClCompile Include="dtls.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="sctp.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="dtls.h">
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="io.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="sctp.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

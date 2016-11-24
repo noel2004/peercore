@@ -135,10 +135,12 @@
     <ClCompile Include="dtls.cpp" />
     <ClCompile Include="io.cpp" />
     <ClCompile Include="rtcdc.cpp" />
+    <ClCompile Include="sctp.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="dtls.h" />
     <ClInclude Include="io.h" />
+    <ClInclude Include="sctp.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
