@@ -15,19 +15,28 @@ namespace rtcdc
         static boost::mutex instantiation_mutex;
     public:
         static SCTPModule* instance();
-        //called in the thread-safe condition
+        //called in a thread-safe condition (mostly in main)
         static void SCTPInit(bool release = false);
 
         SCTPModule();
         ~SCTPModule();
     };
 
+    class SCTP_base
+    {
+    public:
+        virtual void onDispatchToLower(const boost::asio::mutable_buffer&) = 0;
+    };
+
     template<class Layer>
-    class SCTPOutbound : boost::noncopyable
+    class SCTPOutbound : SCTP_base, boost::noncopyable
     {
         Layer lowLevelTransLayer_;
+
+        //interface
+        void onDispatchToLower(const boost::asio::mutable_buffer&) override;
     public:
-        SCTPOutbound(boost::asio::io_service& ios);
+        SCTPOutbound(boost::asio::io_service& ios) : lowLevelTransLayer_(ios){}
     };
 
 
