@@ -4,3 +4,8 @@
 [submodule "vendor/openssl"]
 	path = vendor/openssl
 	url = https://github.com/openssl/openssl.git
+[submodule "vendor/glog"]
+
+	path = vendor/glog
+	
+url = https://github.com/google/glog.git
