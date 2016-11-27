@@ -1,55 +1,58 @@
+#define GLOG_NO_ABBREVIATED_SEVERITIES
 #include "sctp.h"
 #include "usrsctplib/usrsctp.h"
 #include "glog/logging.h"
-#include <boost/noncopyable.hpp>
-#include <map>
-
-template<class Layer>
-class SCTPPrepare : public SCTP_base
-{
-    Layer& lowLevelTransLayer_;
-
-    void onLowLayerIO(bool read, const boost::system::error_code&, std::size_t);
-
-    //interface
-    void onDispatchToLower(const boost::asio::mutable_buffer&) override;
-public:
-    SCTPPrepare(Layer& l) : lowLevelTransLayer_(l){}
-};
-
-
+#include <boost/thread/thread.hpp>
+#include <cstdarg>
 
 namespace rtcdc {
+
+AssociationBase::AssociationBase()
+{
+    usrsctp_register_address(this);
+}
+
+AssociationBase::~AssociationBase()
+{
+    usrsctp_deregister_address(this);
+}
+
+void     AssociationBase::onRecvFromToLower(const unsigned char* p, size_t sz, short ecn_bits)
+{
+    usrsctp_conninput(this, p, sz, (uint8_t) ecn_bits);
+}
 
 class SCTPModuleImpl : public SCTPModule
 {
     static int sctp_conn_output(void *addr, void *buf, size_t length, uint8_t tos, uint8_t set_df)
     {
-        auto pbase = (SCTP_base*)(addr);
-
+        auto pbase = (AssociationBase*)(addr);
+        return pbase->onDispatchToLower(boost::asio::buffer(buf, length), tos, set_df);
     }
 
-    struct portRegData
+    static void sctp_debug_out(const char *format, ...)
     {
-        boost::shared_ptr<SCTP_base> base_;
-    };
+        va_list ap;
+        const static int bufMaxSize = 512;
+        char    tempBuffer[bufMaxSize];
 
-    std::map<int, portRegData>  portRegIndex_;
-    std::map<SCTP_base*, int>   regIndex_;
-
-    bool regSCTPLocalPort(int port, SCTP_base*) override
-    {
-        auto f = portRegIndex_.find(port);
-        if (f != portRegIndex_.end())return false;
+	    va_start(ap, format);
+        VLOG(5) << (vsnprintf(tempBuffer, bufMaxSize, format, ap), tempBuffer);	    
+	    va_end(ap);
     }
 
 public:
     SCTPModuleImpl()
     {
+        usrsctp_init(0, sctp_conn_output, sctp_debug_out);
     }
 
     ~SCTPModuleImpl()
     {
+        LOG(INFO) << "Releasing sctp stack ..." << std::endl;
+        while(usrsctp_finish() != 0)
+            boost::this_thread::sleep_for(boost::chrono::milliseconds(5));
+        LOG(INFO) << "Release sctp stack done!" << std::endl;
     }
 };
 
