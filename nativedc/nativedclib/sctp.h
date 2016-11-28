@@ -5,7 +5,6 @@
 #include <boost/asio.hpp>
 #include <boost/atomic.hpp>
 #include <boost/thread/mutex.hpp>
-#include <boost/enable_shared_from_this.hpp>
 #include <boost/function.hpp>
 #include <string>
 
@@ -21,34 +20,50 @@ namespace rtcdc
         void    sendMessage(const std::string&);                    //text
     };
 
-    class AssociationBase : public boost::enable_shared_from_this<AssociationBase>
+    namespace sctp
     {
-    protected:
-        AssociationBase();
-        //ecn bits was also a tos related field
-        void     onRecvFromToLower(const unsigned char*, size_t, short ecn_bits);
-    public:
-        //tos indicate type of service (see https://en.wikipedia.org/wiki/Type_of_service)
-        //and set_df indicate IP_DF should be set
-        //both field works in IPv4 only
-        virtual int     onDispatchToLower(const boost::asio::mutable_buffer&,
-            short tos, short set_df ) = 0;
+        class AssociationBase
+        {
+        protected:
+            AssociationBase();
+            //ecn bits was also a tos related field
+            void     onRecvFromToLower(const unsigned char*, size_t, short ecn_bits);
+        public:
+            //tos indicate type of service (see https://en.wikipedia.org/wiki/Type_of_service)
+            //and set_df indicate IP_DF should be set
+            //both field works in IPv4 only
+            virtual int     onDispatchToLower(const boost::asio::mutable_buffer&,
+                short tos, short set_df ) = 0;
 
-        virtual ~AssociationBase();
-    };
+            virtual ~AssociationBase();
+            
+        };
 
-    class SCTPModule
-    {
-        static boost::atomic<SCTPModule*> instance_;
-        static boost::mutex instantiation_mutex_;
-    public:
-        static SCTPModule* instance();
-        //called in a thread-safe condition (mostly in main)
-        static void SCTPInit(bool release = false);
+        //our wrapper only allow a sending on message by message 
+        class SocketBase
+        {
+        protected:
+            //void    on
 
-        virtual ~SCTPModule();
+        public:
+            virtual ~SocketBase();
+        };
+
+        class Module
+        {
+            static boost::atomic<Module*> instance_;
+            static boost::mutex instantiation_mutex_;
+        public:
+            static Module* instance();
+            //called in a thread-safe condition (mostly in main)
+            static void Init(bool release = false);
+
+            virtual ~Module();
        
-    };
+        };
+    }
+
+
 
 
 }//namespace rtcdc

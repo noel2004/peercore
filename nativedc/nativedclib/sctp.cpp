@@ -5,7 +5,7 @@
 #include <boost/thread/thread.hpp>
 #include <cstdarg>
 
-namespace rtcdc {
+namespace rtcdc { namespace sctp{
 
 AssociationBase::AssociationBase()
 {
@@ -22,7 +22,7 @@ void     AssociationBase::onRecvFromToLower(const unsigned char* p, size_t sz, s
     usrsctp_conninput(this, p, sz, (uint8_t) ecn_bits);
 }
 
-class SCTPModuleImpl : public SCTPModule
+class ModuleImpl : public Module
 {
     static int sctp_conn_output(void *addr, void *buf, size_t length, uint8_t tos, uint8_t set_df)
     {
@@ -42,12 +42,12 @@ class SCTPModuleImpl : public SCTPModule
     }
 
 public:
-    SCTPModuleImpl()
+    ModuleImpl()
     {
         usrsctp_init(0, sctp_conn_output, sctp_debug_out);
     }
 
-    ~SCTPModuleImpl()
+    ~ModuleImpl()
     {
         LOG(INFO) << "Releasing sctp stack ..." << std::endl;
         while(usrsctp_finish() != 0)
@@ -56,10 +56,10 @@ public:
     }
 };
 
-boost::atomic<SCTPModule*> SCTPModule::instance_(nullptr);
-boost::mutex SCTPModule::instantiation_mutex_;
+boost::atomic<Module*> Module::instance_(nullptr);
+boost::mutex Module::instantiation_mutex_;
 
-SCTPModule* SCTPModule::instance()
+Module* Module::instance()
 {
     auto tmp = instance_.load(boost::memory_order_consume);
     if (tmp == nullptr)
@@ -68,7 +68,7 @@ SCTPModule* SCTPModule::instance()
         tmp = instance_.load(boost::memory_order_consume);
         if (tmp == nullptr)
         {
-            tmp = new SCTPModuleImpl;
+            tmp = new ModuleImpl;
             instance_.store(tmp, boost::memory_order_release);
         }
     }
@@ -76,13 +76,13 @@ SCTPModule* SCTPModule::instance()
     return tmp;
 }
 
-void SCTPModule::SCTPInit(bool release)
+void Module::Init(bool release)
 {
-    if(!release)instance_.store(new SCTPModuleImpl);
+    if(!release)instance_.store(new ModuleImpl);
     else delete instance_.exchange(nullptr);
 }
 
 
-SCTPModule::~SCTPModule(){}
+Module::~Module(){}
 
-}//namespace rtcdc
+}}//namespace rtcdc::sctp
