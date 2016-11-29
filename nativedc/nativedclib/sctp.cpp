@@ -7,6 +7,38 @@
 
 namespace rtcdc { namespace sctp{
 
+bool    SocketBase::errorIsWouldBlock(int e) { return e == EWOULDBLOCK; }
+
+namespace {
+
+    int usrsctp_receive_cb(struct socket *sock, union sctp_sockstore addr, void *data,
+        size_t datalen, struct sctp_rcvinfo rcv, int flags, void *ulp_info)
+    {
+        
+    }
+
+}
+
+SocketBase::SocketBase()
+{
+    usrsctp_sock_ = usrsctp_socket(AF_CONN, SOCK_STREAM, IPPROTO_SCTP, usrsctp_receive_cb, NULL, 0, this);
+}
+
+SocketBase::~SocketBase()
+{
+
+}
+
+int     SocketBase::sendv(unsigned short sid, const boost::asio::mutable_buffer&, unsigned int ppid, int rtx = 0, bool ord = false)
+{
+
+}
+
+int     SocketBase::sendv(const boost::asio::mutable_buffer&)
+{
+
+}
+
 AssociationBase::AssociationBase()
 {
     usrsctp_register_address(this);

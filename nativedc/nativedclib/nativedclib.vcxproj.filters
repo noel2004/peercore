@@ -26,6 +26,9 @@
     <ClCompile Include="sctp.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="dc.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="dtls.h">
@@ -38,6 +41,9 @@
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="sctpwrapper.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="dc.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

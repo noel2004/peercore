@@ -138,8 +138,10 @@
     <ClCompile Include="io.cpp" />
     <ClCompile Include="rtcdc.cpp" />
     <ClCompile Include="sctp.cpp" />
+    <ClCompile Include="dc.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="dc.h" />
     <ClInclude Include="dtls.h" />
     <ClInclude Include="io.h" />
     <ClInclude Include="sctp.h" />

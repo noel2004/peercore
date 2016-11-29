@@ -5,21 +5,9 @@
 #include <boost/asio.hpp>
 #include <boost/atomic.hpp>
 #include <boost/thread/mutex.hpp>
-#include <boost/function.hpp>
-#include <string>
 
 namespace rtcdc
 {
-    class SCTP_tunnel
-    {
-    public:
-        void    open(boost::function<void>(const boost::asio::mutable_buffer&),
-            boost::function<void>(const std::string&),
-            boost::system::error_code&);
-        void    sendMessage(const boost::asio::mutable_buffer&);    //binary, blob
-        void    sendMessage(const std::string&);                    //text
-    };
-
     namespace sctp
     {
         class AssociationBase
@@ -39,14 +27,29 @@ namespace rtcdc
             
         };
 
-        //our wrapper only allow a sending on message by message 
+        //our wrapper for a one-to-one socket which only allows sending message by message 
+        //the message sending may fail for EWOULDBLOCK (buffer is full)
+        //but we have no way to notify when sending become availiable again yet ...
+        //it was up to the caller to handle such a case 
         class SocketBase
         {
+            void*   usrsctp_sock_;//c wrapper of usrsctp socket
         protected:
             //void    on
+            virtual void onRecvv(unsigned short sid, const boost::asio::mutable_buffer&, unsigned int ppid) = 0;
+            virtual void onRecvv(const boost::asio::mutable_buffer&) = 0;
+            SocketBase(AssociationBase*);
 
         public:
+            bool    isOK() const;
             virtual ~SocketBase();
+            //simplified sending entries: only sid/ppid and retransmission, ordering options is specified
+            int     sendv(unsigned short sid, const boost::asio::mutable_buffer&, unsigned int ppid, int rtx = 0, bool ord = false);
+            //an empty sending without info
+            int     sendv(const boost::asio::mutable_buffer&);
+
+            //some flag testing entries ...
+            bool    errorIsWouldBlock(int);
         };
 
         class Module
