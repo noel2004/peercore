@@ -10,34 +10,28 @@
 namespace rtcdc
 {
 
-
-class SocketCore : public boost::enable_shared_from_this<SocketCore>
+class SCTPSocketCore : public boost::enable_shared_from_this<SCTPSocketCore>
 {
-    const   bool is_one_to_one_;
-    void*   usrsctp_sock_;//c wrapper of usrsctp socket
-protected:
-    //void    on
-    virtual void onRecvv(unsigned short sid, const boost::asio::mutable_buffer&, unsigned int ppid) = 0;
-    virtual void onRecvv(const boost::asio::mutable_buffer&) = 0;
-    SocketCore(sctp::AssociationBase*);
-
 public:
-    bool    isOK() const;
-    virtual ~SocketCore();
+    virtual ~SCTPSocketCore();
 
-    int     bindTo(sctp::AssociationBase*);
-
+    boost::shared_ptr<SCTPSocketCore>   createSocketCore(sctp::AssociationBase*, unsigned short port, 
+        bool one_to_one = true);
+    virtual void*   nativeHandle() = 0;
+    virtual bool    oneToManyMode() const = 0;
+//  TODO, for one-to-many mode:
+//    boost::shared_ptr<SocketCore>   peeloff();
 };
 
 //the transport core for datachannel, which will bound to a
 //one-to-one or one-to-many socket
 class DataChannelCore
 {
-    boost::shared_ptr<SocketCore>   transport_;
+    boost::shared_ptr<SCTPSocketCore>   transport_;
 public:
     DataChannelCore();
-    DataChannelCore(SocketCore&);
-    SocketCore& trans() const;
+    DataChannelCore(SCTPSocketCore&);
+    SCTPSocketCore& trans() const;
 };
 
 //datachannel interface

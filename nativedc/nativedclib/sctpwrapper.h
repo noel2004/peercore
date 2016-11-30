@@ -51,6 +51,12 @@ namespace rtcdc
         SCTP_Association(Layer& l) : lowLevelTransLayer_(l), runFlag_(false){}
         ~SCTP_Association(){}
 
+        const char*     layerName() override
+        {
+            static const char n[] = "SCTP Association basic layer";
+            return n;
+        }
+
         void    init()
         {
             runFlag_ = true;

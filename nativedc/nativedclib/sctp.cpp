@@ -2,42 +2,12 @@
 #include "sctp.h"
 #include "usrsctplib/usrsctp.h"
 #include "glog/logging.h"
+#include <boost/asio/buffer.hpp>
 #include <boost/thread/thread.hpp>
+#include <boost/atomic.hpp>
 #include <cstdarg>
 
 namespace rtcdc { namespace sctp{
-
-bool    SocketBase::errorIsWouldBlock(int e) { return e == EWOULDBLOCK; }
-
-namespace {
-
-    int usrsctp_receive_cb(struct socket *sock, union sctp_sockstore addr, void *data,
-        size_t datalen, struct sctp_rcvinfo rcv, int flags, void *ulp_info)
-    {
-        
-    }
-
-}
-
-SocketBase::SocketBase()
-{
-    usrsctp_sock_ = usrsctp_socket(AF_CONN, SOCK_STREAM, IPPROTO_SCTP, usrsctp_receive_cb, NULL, 0, this);
-}
-
-SocketBase::~SocketBase()
-{
-
-}
-
-int     SocketBase::sendv(unsigned short sid, const boost::asio::mutable_buffer&, unsigned int ppid, int rtx = 0, bool ord = false)
-{
-
-}
-
-int     SocketBase::sendv(const boost::asio::mutable_buffer&)
-{
-
-}
 
 AssociationBase::AssociationBase()
 {
@@ -86,22 +56,25 @@ public:
             boost::this_thread::sleep_for(boost::chrono::milliseconds(5));
         LOG(INFO) << "Release sctp stack done!" << std::endl;
     }
+
+    static boost::atomic<Module*> instance_;
+    static boost::mutex instantiation_mutex_;
 };
 
-boost::atomic<Module*> Module::instance_(nullptr);
-boost::mutex Module::instantiation_mutex_;
+boost::atomic<Module*> ModuleImpl::instance_(nullptr);
+boost::mutex ModuleImpl::instantiation_mutex_;
 
 Module* Module::instance()
 {
-    auto tmp = instance_.load(boost::memory_order_consume);
+    auto tmp = ModuleImpl::instance_.load(boost::memory_order_consume);
     if (tmp == nullptr)
     {
-        boost::mutex::scoped_lock guard(instantiation_mutex_);
-        tmp = instance_.load(boost::memory_order_consume);
+        boost::mutex::scoped_lock guard(ModuleImpl::instantiation_mutex_);
+        tmp = ModuleImpl::instance_.load(boost::memory_order_consume);
         if (tmp == nullptr)
         {
             tmp = new ModuleImpl;
-            instance_.store(tmp, boost::memory_order_release);
+            ModuleImpl::instance_.store(tmp, boost::memory_order_release);
         }
     }
 
@@ -110,8 +83,8 @@ Module* Module::instance()
 
 void Module::Init(bool release)
 {
-    if(!release)instance_.store(new ModuleImpl);
-    else delete instance_.exchange(nullptr);
+    if(!release)ModuleImpl::instance_.store(new ModuleImpl);
+    else delete ModuleImpl::instance_.exchange(nullptr);
 }
 
 
