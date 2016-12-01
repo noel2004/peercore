@@ -142,6 +142,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="dc.h" />
+    <ClInclude Include="dctransport.h" />
     <ClInclude Include="dtls.h" />
     <ClInclude Include="io.h" />
     <ClInclude Include="sctp.h" />

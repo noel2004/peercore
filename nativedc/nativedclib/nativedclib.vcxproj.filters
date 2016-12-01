@@ -46,5 +46,8 @@
     <ClInclude Include="dc.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="dctransport.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
