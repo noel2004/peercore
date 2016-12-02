@@ -1,11 +1,13 @@
 #define GLOG_NO_ABBREVIATED_SEVERITIES
 #include "sctp.h"
+#include "dctransport.h"
 #include "usrsctplib/usrsctp.h"
 #include "glog/logging.h"
 #include <boost/asio/buffer.hpp>
 #include <boost/thread/thread.hpp>
 #include <boost/atomic.hpp>
 #include <cstdarg>
+#include <exception>
 
 namespace rtcdc { namespace sctp{
 
@@ -13,11 +15,18 @@ namespace rtcdc { namespace sctp{
 
 SocketCore::~SocketCore(){}
 
+class SCTPDemultiplexFail : std::runtime_error
+{
+public:
+    SCTPDemultiplexFail() : std::runtime_error("Not existed SCTP port"){}
+};
+
 namespace _concept{
 
     struct callbackhandler
     {
-        int f(struct socket *, unsigned short port, void *, size_t, 
+        boost::shared_ptr<DatachannelCoreCall> demultiplex(unsigned short port) throw(SCTPDemultiplexFail);
+        int not_handled(struct socket *, unsigned short port, void *, size_t, 
             const struct sctp_rcvinfo&, int);
     };
 }
@@ -26,11 +35,81 @@ template<class RecvCallbackHandler>
 class SocketCoreImpl : public SocketCore
 {
 protected:
+    inline void bufferFree(void* data) { free(data); }
+
     static int usrsctp_receive_cb(struct socket *sock, union sctp_sockstore addr, void *data,
         size_t datalen, struct sctp_rcvinfo rcv, int flags, void *ulp_info)
     {
-        reinterpret_cast<RecvCallbackHandler*>(ulp_info)->f(sock, 
+        //no data (data == nullptr) may indicate a error in socket 
+
+        //lazy binding ...
+        bool handled = false;
+        auto demultiplex = [&handled, &addr, ulp_info]()-> boost::shared_ptr<DatachannelCoreCall>
+        {
+            handled = true;
+            return reinterpret_cast<RecvCallbackHandler*>(ulp_info)->demultiplex(addr.sconn.sconn_port);
+        };
+
+        try {
+            if (data == nullptr) {
+                demultiplex()->onAssocError("Recv error: no data");
+            }
+            else if ((flags & MSG_NOTIFICATION) != 0)
+            {
+                //handle notification ...
+                auto pnotify = (union sctp_notification *) (data);
+                switch (pnotify->sn_header.sn_type)
+                {
+                case SCTP_ASSOC_CHANGE:
+                {
+                    auto& sac = pnotify->sn_assoc_change;
+                    switch (sac.sac_state)
+                    {
+                    case SCTP_COMM_UP:
+                    {                    
+                        unsigned short strmcnt[2] = {sac.sac_inbound_streams, 
+                            sac.sac_outbound_streams};
+                        demultiplex()->onAssocOpened(strmcnt);
+                        break;
+                    }
+                    case SCTP_SHUTDOWN_COMP:
+                        demultiplex()->onAssocClosed();
+                        break;
+                    case SCTP_COMM_LOST:
+                        demultiplex()->onAssocError("Lost", true);
+                        break;
+                    case SCTP_CANT_STR_ASSOC:
+                        demultiplex()->onAssocError("Can't setup");
+                        break;
+                    }
+                }
+                    break;
+                case SCTP_SEND_FAILED_EVENT:
+                    break;
+                case SCTP_SENDER_DRY_EVENT:
+                    demultiplex()->onCanSendMore();
+                    break;
+                }
+            }
+            else {
+
+            }
+
+        }
+        catch (SCTPDemultiplexFail& e)
+        {
+            handled = true;
+        }
+
+        if (!handled)
+        {
+            reinterpret_cast<RecvCallbackHandler*>(ulp_info)->not_handled(sock, 
             addr.sconn.sconn_port, data, datalen, rcv, flags);
+        }
+
+        if (data != nullptr)free(data);//IMPORTANT! the data in callback is malloced! 
+                                       //(and possible performance penalty ...)
+        return 1;
     }
 
     struct socket*  usrsctp_sock_;
@@ -64,7 +143,22 @@ public:
             }
 
             struct sctp_event sctpevent = { 0 };
-            sctpevent.se_assoc_id = 0;
+            sctpevent.se_assoc_id = SCTP_ALL_ASSOC;
+            sctpevent.se_on = 1;
+            uint16_t event_types[] = {
+                SCTP_ASSOC_CHANGE, 
+                SCTP_SEND_FAILED_EVENT, 
+                SCTP_SENDER_DRY_EVENT
+            };
+            for (int i = 0; i < sizeof(event_types) / sizeof(uint16_t); i++)
+            {
+		        sctpevent.se_type = event_types[i];
+		        if (usrsctp_setsockopt(usrsctp_sock_, IPPROTO_SCTP, SCTP_EVENT, &sctpevent, 
+                    sizeof(sctpevent)) < 0) {
+			        LOG(ERROR) << "subscribe event "<<sctpevent.se_type<<" fail:"<< errno << std::endl;
+                    break;
+		        }
+            }
 
             //backlog = 1 can be applied to any mode
             if (usrsctp_listen(usrsctp_sock_, 1) < 0)
@@ -118,7 +212,7 @@ public:
         //TODO
     }
 
-    bool    addEntry(unsigned short port, DatachannelCoreCall*) final
+    bool    addEntry(unsigned short port, boost::shared_ptr<DatachannelCoreCall>) final
     {
         //TODO
         return false;
@@ -132,16 +226,17 @@ public:
 
 class SingleSocketCore : public SocketCoreImpl<SingleSocketCore>
 {
-    boost::mutex    accept_lock_;
+    boost::mutex                        accept_lock_;
+    boost::atomic<DatachannelCoreCall*> callback_;
 public:
     SingleSocketCore() : SocketCoreImpl<CollectionSocketCore>(true){}
 
-    int f(struct socket * sock, unsigned short , void *, size_t,
-        const struct sctp_rcvinfo&, int)
+    int f(struct socket * sock, unsigned short /*omit the port*/, 
+        void *data, size_t datalen, const struct sctp_rcvinfo& rcvinfo, int flags)
     {
     }
 
-    bool    addEntry(unsigned short port, DatachannelCoreCall*) final
+    bool    addEntry(unsigned short port, boost::shared_ptr<DatachannelCoreCall>) final
     {
         //TODO
         return false;

@@ -53,7 +53,8 @@ namespace rtcdc
             //socket for AF_CONN type can only distinguish associations by their ports
             //(all assoc's addrs are identify), port = 0 indicate remove a entry
             //if socket is under one-to-one mode, only one DCCall can be added
-            virtual bool    addEntry(unsigned short port, DatachannelCoreCall*) = 0;
+            virtual bool    addEntry(unsigned short port, 
+                boost::shared_ptr<DatachannelCoreCall>) = 0;
             //for one-to-many mode:
             virtual boost::shared_ptr<SocketCore>   peeloff() = 0;
 
