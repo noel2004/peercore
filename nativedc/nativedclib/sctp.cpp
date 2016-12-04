@@ -26,6 +26,8 @@ namespace _concept{
     struct callbackhandler
     {
         boost::shared_ptr<DatachannelCoreCall> demultiplex(unsigned short port) throw(SCTPDemultiplexFail);
+        bool pre_handled(struct socket *, unsigned short port, void *, size_t, 
+            const struct sctp_rcvinfo&, int);
         int not_handled(struct socket *, unsigned short port, void *, size_t, 
             const struct sctp_rcvinfo&, int);
     };
@@ -35,12 +37,17 @@ template<class RecvCallbackHandler>
 class SocketCoreImpl : public SocketCore
 {
 protected:
-    inline void bufferFree(void* data) { free(data); }
+    inline static void bufferFree(void* data) { free(data); }
 
     static int usrsctp_receive_cb(struct socket *sock, union sctp_sockstore addr, void *data,
         size_t datalen, struct sctp_rcvinfo rcv, int flags, void *ulp_info)
     {
-        //no data (data == nullptr) may indicate a error in socket 
+        if (data != nullptr && reinterpret_cast<RecvCallbackHandler*>(ulp_info)->pre_handled(sock,
+            addr.sconn.sconn_port, data, datalen, rcv, flags)
+        {
+            free(data);
+            return 1;
+        }
 
         //lazy binding ...
         bool handled = false;
@@ -52,6 +59,7 @@ protected:
 
         try {
             if (data == nullptr) {
+                //no data (data == nullptr) may indicate a error in socket 
                 demultiplex()->onAssocError("Recv error: no data");
             }
             else if ((flags & MSG_NOTIFICATION) != 0)
@@ -92,13 +100,13 @@ protected:
                 }
             }
             else {
-
+                demultiplex()->onMessage(boost::asio::buffer(data, datalen), bufferFree);
+                data = nullptr;
             }
 
         }
         catch (SCTPDemultiplexFail& e)
         {
-            handled = true;
         }
 
         if (!handled)
@@ -196,7 +204,7 @@ class CollectionSocketCore : public SocketCoreImpl<CollectionSocketCore>
 public:
     CollectionSocketCore() : SocketCoreImpl<CollectionSocketCore>(false){}
 
-    int f(struct socket * sock, unsigned short port, void *, size_t,
+    int pre_handled(struct socket * sock, unsigned short port, void *, size_t,
         const struct sctp_rcvinfo&, int)
     {
         //TODO:
@@ -231,7 +239,7 @@ class SingleSocketCore : public SocketCoreImpl<SingleSocketCore>
 public:
     SingleSocketCore() : SocketCoreImpl<CollectionSocketCore>(true){}
 
-    int f(struct socket * sock, unsigned short /*omit the port*/, 
+    int pre_handled(struct socket * sock, unsigned short /*omit the port*/, 
         void *data, size_t datalen, const struct sctp_rcvinfo& rcvinfo, int flags)
     {
     }

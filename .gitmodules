@@ -9,3 +9,6 @@
 	path = vendor/glog
 	
 url = https://github.com/google/glog.git
+[submodule "vendor/libnice"]
+	path = vendor/libnice
+	url = https://github.com/libnice/libnice.git
