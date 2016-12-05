@@ -57,7 +57,7 @@ namespace rtcdc
             return n;
         }
 
-        void    init()
+        void    init(boost::system::error_code& ec)
         {
             runFlag_ = true;
             readMore();

@@ -2,6 +2,8 @@
 #ifndef NATIVEDATACHANNEL_LIB_IO_BASE_H
 #define NATIVEDATACHANNEL_LIB_IO_BASE_H
 
+#include <boost/asio.hpp>
+
 namespace rtcdc
 {
     struct net_stack_options
@@ -14,62 +16,52 @@ namespace rtcdc
         static bool         ipv6_only_stack_;
     };
 
-    //one traffic core act as an addr in AF_CONN mode of usrsctp
-    template<class Layer>
-    class SCTP_Association : AssociationBase
+    //additional wrapping for boost::asio::ip::udp::socket
+    class asio_socketwrapper : boost::asio::ip::udp::socket
     {
-        Layer   lowLevelTransLayer_;
-        bool    use_v4_;    //flag set when working under ipv4
-
-        int     onDispatchToLower(const boost::asio::mutable_buffer& buf, short, short) override
-        {
-            //here we use SYNC api ...
-            boost::system::error_code ec;
-            lowLevelTransLayer_.send(buf, 0, ec);
-            return !ec ? 0 : ec.value();
-        }        
+        bool    use_v4_;    //flag set when working under ipv4     
 
     public:
-        SCTP_TrafficCore(boost::asio::io_service& ios) : lowLevelTransLayer_(ios), use_v4_(false){}
-        ~SCTP_TrafficCore()
-        {
+        asio_socketwrapper(boost::asio::io_service& ios) : 
+            boost::asio::ip::udp::socket(ios), use_v4_(false){}
+        ~asio_socketwrapper(){}
 
-        }
-
-        typedef typename lowLevelTransLayer_::endpoint_type endpoint_type;
+        typedef boost::asio::ip::udp::socket socket_type;
 
         void    open(boost::system::error_code& ec)
         {
-            lowLevelTransLayer_.open(lowLevelTransLayer_::protocol_type::v6(), ec);
+            socket_type::open(socket_type::protocol_type::v6(), ec);
             if (!ec)
             {
-                if (!net_stack_options::ipv6_only_stack)
+                if (!net_stack_options::ipv6_only_stack_)
                 {
                     //so we can listen on both v4 or v6 address
                     boost::asio::ip::v6_only opt(false);
-                    lowLevelTransLayer_.set_option(opt, ec);
+                    socket_type::set_option(opt, ec);
                 }
                 if (!ec)return;
             }
 
             use_v4_ = true;
-            lowLevelTransLayer_.open(lowLevelTransLayer_::protocol_type::v4(), ec);
+            socket_type::open(socket_type::protocol_type::v4(), ec);
 
         }
 
         void    prepare(boost::system::error_code& ec, unsigned short port = 0)
         {
-            lowLevelTransLayer_.bind(endpoint_type(use_v4_ ?
-                lowLevelTransLayer_::protocol_type::v4() :
-                lowLevelTransLayer_::protocol_type::v6(), port), ec);
+            socket_type::bind(socket_type::endpoint_type(use_v4_ ?
+                socket_type::protocol_type::v4() :
+                socket_type::protocol_type::v6(), port), ec);
 
             if (ec)return;
-
-
         }
 
-        //TODO: an equivalent for socket::connect
-        void    establish(const endpoint_type& ep){}
+        unsigned short get_port(boost::system::error_code& ec)
+        {
+            auto ep = socket_type::local_endpoint(ec);
+            if (!!ec)return 0;
+            return ep.port();
+        }
 
     };
 

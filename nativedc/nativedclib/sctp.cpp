@@ -17,8 +17,10 @@ SocketCore::~SocketCore(){}
 
 class SCTPDemultiplexFail : std::runtime_error
 {
+    unsigned short port_;
 public:
-    SCTPDemultiplexFail() : std::runtime_error("Not existed SCTP port"){}
+    SCTPDemultiplexFail(unsigned short p) : 
+        std::runtime_error("Not existed SCTP port"), port_(p){}
 };
 
 namespace _concept{
@@ -42,8 +44,10 @@ protected:
     static int usrsctp_receive_cb(struct socket *sock, union sctp_sockstore addr, void *data,
         size_t datalen, struct sctp_rcvinfo rcv, int flags, void *ulp_info)
     {
+        if (ulp_info == nullptr)return 1;//released socket ...
+
         if (data != nullptr && reinterpret_cast<RecvCallbackHandler*>(ulp_info)->pre_handled(sock,
-            addr.sconn.sconn_port, data, datalen, rcv, flags)
+            addr.sconn.sconn_port, data, datalen, rcv, flags))
         {
             free(data);
             return 1;
@@ -77,6 +81,7 @@ protected:
                     {                    
                         unsigned short strmcnt[2] = {sac.sac_inbound_streams, 
                             sac.sac_outbound_streams};
+                        //pass usrsctp_sock_, not 
                         demultiplex()->onAssocOpened(strmcnt);
                         break;
                     }
@@ -100,32 +105,41 @@ protected:
                 }
             }
             else {
-                demultiplex()->onMessage(boost::asio::buffer(data, datalen), bufferFree);
-                data = nullptr;
+                demultiplex()->onDCMessage(rcv.rcv_sid, ntohl(rcv.rcv_ppid), 
+                    boost::asio::buffer(data, datalen), bufferFree);
+                data = nullptr; /*let onMessage handle the release of buffer*/              
             }
 
         }
-        catch (SCTPDemultiplexFail& e)
+        catch (SCTPDemultiplexFail&)
         {
         }
 
+        int rret = 1;
+
         if (!handled)
         {
-            reinterpret_cast<RecvCallbackHandler*>(ulp_info)->not_handled(sock, 
+            rret = reinterpret_cast<RecvCallbackHandler*>(ulp_info)->not_handled(sock, 
             addr.sconn.sconn_port, data, datalen, rcv, flags);
         }
 
         if (data != nullptr)free(data);//IMPORTANT! the data in callback is malloced! 
-                                       //(and possible performance penalty ...)
-        return 1;
+                                       //(and a possible point for improving performance ...)
+        return rret;
     }
 
     struct socket*  usrsctp_sock_;
     const bool      is_one_to_one_;
+    unsigned short  sstream_inout_[2];//[in, out]
 
 public:
     SocketCoreImpl(bool one_to_one) : 
-        is_one_to_one_(one_to_one), usrsctp_sock_(nullptr){}
+        is_one_to_one_(one_to_one), usrsctp_sock_(nullptr)
+    {
+        //some default parameters
+        sstream_inout_[0] = 1024;
+        sstream_inout_[1] = 1024;
+    }
 
     bool    init(sctp::AssociationBase* base, unsigned short sctpport)
     {
@@ -147,6 +161,24 @@ public:
             if (usrsctp_bind(usrsctp_sock_, (struct sockaddr *)&sconn, sizeof(struct sockaddr_conn)) < 0)
             {
                 LOG(ERROR) << "bind fail: " << errno << std::endl;
+                break;
+            }
+
+            const int opt_on = 1;
+	        if (usrsctp_setsockopt(usrsctp_sock_, IPPROTO_SCTP, SCTP_RECVRCVINFO, &opt_on, sizeof(int)) < 0) {
+                LOG(ERROR) << "set opt - enable rcvinfo fail: " << errno << std::endl;
+                break;
+            }
+	        //if (usrsctp_setsockopt(usrsctp_sock_, IPPROTO_SCTP, SCTP_EXPLICIT_EOR, &opt_on, sizeof(int)) < 0) {
+         //       LOG(ERROR) << "set opt - enable explicit EOR fail: " << errno << std::endl;
+         //       break;
+	        //}
+            struct sctp_initmsg sctpinit = { 0 };
+	        sctpinit.sinit_num_ostreams = sstream_inout_[0];
+	        sctpinit.sinit_max_instreams = sstream_inout_[1];
+	        if (usrsctp_setsockopt(usrsctp_sock_, IPPROTO_SCTP, SCTP_INITMSG, &sctpinit, sizeof(sctpinit)) < 0) {
+                LOG(ERROR) << "set opt - initmsg information ("<<sstream_inout_[0]
+                    <<","<<sstream_inout_[1]<<") fail: " << errno << std::endl;
                 break;
             }
 
@@ -183,6 +215,19 @@ public:
         return false;
     }
 
+    //default pre_handled and not_handled ...
+    bool pre_handled(struct socket *, unsigned short , void *, size_t,
+        const struct sctp_rcvinfo&, int)
+    {
+        return false;
+    }
+
+    int not_handled(struct socket *, unsigned short , void *, size_t,
+        const struct sctp_rcvinfo&, int) 
+    {
+        return 1;
+    }
+
     ~SocketCoreImpl()
     {
         if(usrsctp_sock_ != nullptr){
@@ -199,25 +244,20 @@ public:
 
 class CollectionSocketCore : public SocketCoreImpl<CollectionSocketCore>
 {
-    boost::mutex    peeloff_lock_;
-    boost::mutex    demultiplex_lock_;
+
 public:
     CollectionSocketCore() : SocketCoreImpl<CollectionSocketCore>(false){}
 
-    int pre_handled(struct socket * sock, unsigned short port, void *, size_t,
-        const struct sctp_rcvinfo&, int)
+    bool pre_handled(struct socket * sock, unsigned short port, void *data, size_t,
+        const struct sctp_rcvinfo&, int flags)
     {
-        //TODO:
-        //one - to -many socket must handle the case that a association is peeloff:
-        //in this case the sock (may) not identify to the aggregated one (usrsctp_sock_)
-        if (sock != usrsctp_sock_)
-        {
-            boost::mutex::scoped_lock guard(peeloff_lock_);
-            return;
-        }
+        return false;
+    }
 
-        //must demultiplex the content to given dc-core
-        //TODO
+    boost::shared_ptr<DatachannelCoreCall> demultiplex(unsigned short port) throw(SCTPDemultiplexFail)
+    {
+        throw SCTPDemultiplexFail(port);
+        return nullptr;
     }
 
     bool    addEntry(unsigned short port, boost::shared_ptr<DatachannelCoreCall>) final
@@ -234,20 +274,63 @@ public:
 
 class SingleSocketCore : public SocketCoreImpl<SingleSocketCore>
 {
+    boost::shared_ptr<DatachannelCoreCall> call_back_;
+    bool                                have_accepted_;
     boost::mutex                        accept_lock_;
-    boost::atomic<DatachannelCoreCall*> callback_;
 public:
-    SingleSocketCore() : SocketCoreImpl<CollectionSocketCore>(true){}
+    SingleSocketCore() : SocketCoreImpl<SingleSocketCore>(true),
+        have_accepted_(false), call_back_(nullptr){}
 
-    int pre_handled(struct socket * sock, unsigned short /*omit the port*/, 
-        void *data, size_t datalen, const struct sctp_rcvinfo& rcvinfo, int flags)
+    boost::shared_ptr<DatachannelCoreCall> demultiplex(unsigned short port) throw(SCTPDemultiplexFail)
     {
+        if (!call_back_)throw SCTPDemultiplexFail(port);
+        return call_back_;
     }
 
-    bool    addEntry(unsigned short port, boost::shared_ptr<DatachannelCoreCall>) final
+    bool    pre_handled(struct socket * sock, unsigned short /*omit the port*/, 
+        void *data, size_t datalen, const struct sctp_rcvinfo& rcvinfo, int flags)
     {
-        //TODO
+        if (have_accepted_)return sock != usrsctp_sock_;//if not match, just omit the recv!
+
+        boost::mutex::scoped_lock   guard(accept_lock_);
+        if (have_accepted_)return sock != usrsctp_sock_;//double-checking 
+
+        auto pnotify = (union sctp_notification *) (data);
+
+        //only check assoc setup event ...
+        if (data != nullptr && (flags & MSG_NOTIFICATION) != 0
+            && pnotify->sn_header.sn_type == SCTP_ASSOC_CHANGE 
+            && pnotify->sn_assoc_change.sac_state == SCTP_COMM_UP)
+        {
+            auto ps = usrsctp_accept(usrsctp_sock_, NULL, NULL);
+            if (ps != nullptr)
+            {
+                //no need to check the incoming address ...
+                LOG(INFO) << "sctp socket accept the incoming one" << std::endl;
+                have_accepted_ = true;
+
+                auto old_del = usrsctp_sock_;
+                usrsctp_sock_ = ps;
+
+                usrsctp_set_ulpinfo(old_del, nullptr);
+                usrsctp_close(old_del);
+            }
+        }
+
+        //continue handling ...
         return false;
+    }
+
+    bool    addEntry(unsigned short port, boost::shared_ptr<DatachannelCoreCall> cb) final
+    {
+        if (port != 0 && !!call_back_)return false;//can only add one callback
+
+        if (port == 0 && cb == call_back_)call_back_.reset();
+        else if( port != 0)call_back_ = cb;
+        //else we do nothing
+        else return false;
+
+        return true;
     }
 
     boost::shared_ptr<SocketCore>   peeloff() final{
@@ -255,6 +338,27 @@ public:
         return nullptr;
     }
 };
+
+/*--------------------------------CREATE SOCKET-------------------------------*/
+boost::shared_ptr<SocketCore>   SocketCore::createSocketCore(
+    AssociationBase* pbase, unsigned short port, bool one_to_one)
+{
+    boost::shared_ptr<SocketCore> pret;
+    if (one_to_one)
+    {
+        auto p = boost::shared_ptr<SingleSocketCore>(new SingleSocketCore());
+        p->init(pbase, port);
+        pret = p;
+    }
+    else
+    {
+        auto p = boost::shared_ptr<CollectionSocketCore>(new CollectionSocketCore());
+        p->init(pbase, port);
+        pret = p;
+    }
+
+    return pret;
+}
 
 /*------------------------------- ASSOCIATION --------------------------------*/
 
