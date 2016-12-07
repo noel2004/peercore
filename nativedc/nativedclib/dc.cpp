@@ -30,7 +30,7 @@ namespace {
     const uint8_t DATA_CHANNEL_ACK = 2;
     const uint8_t DATA_CHANNEL_OPEN_NEW = 3;
 
-    //*** this defination follows draft-data-protocol-03 and later and
+    //*** this defination follows draft-jesup-data-protocol-03 and later and
     //*** is not compatible with draft-01 or 02
     const uint8_t DATA_CHANNEL_RELIABLE = 0;
     //const uint8_t DATA_CHANNEL_RELIABLE_STREAM = 1;
@@ -103,7 +103,7 @@ namespace {
         {}
     };
 
-    class DataChannelImpl : public DataChannel
+    class DataChannelImpl : public DataChannel, boost::noncopyable
     {
         uint16_t sctp_pr_policy_;
         bool     updateChnType(uint8_t chntype)
@@ -127,13 +127,16 @@ namespace {
         }
 
     public:
-        DataChannelImpl()
+
+        const bool jesup_compatible_;
+
+        DataChannelImpl() : jesup_compatible_(false) /*not care the flag for initiator*/
         {
 
         }
 
         DataChannelImpl(struct rtcweb_datachannel_open_request* p, size_t len) throw(DC_Invalid_Request)
-        {
+        : jesup_compatible_(true){
             if (len < sizeof(struct rtcweb_datachannel_open_request))
                 throw DC_Invalid_Request(len, sizeof(struct rtcweb_datachannel_open_request));
 
@@ -141,6 +144,7 @@ namespace {
         }
 
         DataChannelImpl(struct rtcweb_datachannel_open_msg* p, size_t len) throw(DC_Invalid_Request)
+        : jesup_compatible_(false)
         {
 
         }
@@ -175,16 +179,21 @@ namespace {
         void    onDCMessage(unsigned short sid, unsigned int ppid, 
             const boost::asio::mutable_buffer& buffer, void (*freebuffer)(void*)) final 
         {
-            boost::shared_ptr<DataChannel> p;
-            try{
-                read_lock guard(dc_index_lock_);                
-                p = dc_index_[sid];
-            }
-            catch (boost::lock_error& e)
+            auto takep = [this](unsigned short sid)
+                -> boost::shared_ptr<DataChannel>
             {
-                LOG(ERROR) << "Get read lock fail! lost message for [" << sid <<"]: "
-                    <<e.what()<< std::endl;
-            }
+                try{
+                    read_lock guard(dc_index_lock_);                
+                    return dc_index_[sid];
+                }
+                catch (boost::lock_error& e)
+                {
+                    LOG(ERROR) << "Get read lock fail! lost message for [" << sid <<"]: "
+                        <<e.what()<< std::endl;
+                }
+                return nullptr;
+            };
+            auto p = takep(sid);
             
             //deliver to dc ....
             auto buffersz = boost::asio::buffer_size(buffer);
@@ -199,12 +208,14 @@ namespace {
 
                 auto msg_type = *boost::asio::buffer_cast<uint8_t*>(buffer);
                 switch(msg_type){
-                //try to support both draft-rtcweb-data-protocol-03 and later 
+                //try to support both old draft-rtcweb-data-protocol (jesup ver.) and the renewed one (rtcweb)
                 case DATA_CHANNEL_OPEN_NEW:
                 case DATA_CHANNEL_OPEN_REQUEST:
                     if (!!p) {
                         LOG(ERROR) << "channel " << sid << " has existed " << std::endl;
                         //cancel the exist channel
+                        io_srv_.post(boost::bind(&DataChannelCoreImpl::dcctrl_close,
+                            shared_from_this(), p));
                     }
                     else {
                         try {
@@ -224,7 +235,29 @@ namespace {
                     }
                     break;
                 case DATA_CHANNEL_OPEN_RESPONSE:
+                {
+                    auto pmsg = boost::asio::buffer_cast<struct rtcweb_datachannel_open_response*>(buffer);
+                    //error and flag in response is TBD. and not used
+                    if (pmsg->reverse_stream == sid || (p = takep(pmsg->reverse_stream), !p)) {
+                        LOG(ERROR) << "channel " << sid << " has no match for open_resp " << std::endl;
+                        //just ignore ...
+                    }
+                    else {
+                        io_srv_.post(boost::bind(&DataChannelCoreImpl::dcctrl_open_ack,
+                            shared_from_this(), p));
+                        //should also send an ack
+                    }
+                }
+                    break;
                 case DATA_CHANNEL_ACK:
+                    if (!p)
+                    {
+                        LOG(ERROR) << "channel " << sid << " has no match for open_ack " << std::endl;
+                    }else
+                    {
+                        io_srv_.post(boost::bind(&DataChannelCoreImpl::dcctrl_open_ack,
+                            shared_from_this(), p));
+                    }
                     break;
                 default:
                     break;
@@ -237,12 +270,16 @@ namespace {
 
         boost::asio::io_service&    io_srv_;
 
-        void dcctrl_open(boost::shared_ptr<DataChannel>)
+        void dcctrl_open(boost::shared_ptr<DataChannelImpl> p)
+        {
+        }
+
+        void dcctrl_open_ack(boost::shared_ptr<DataChannelImpl>)
         {
 
         }
 
-        void dcctrl_close(boost::shared_ptr<DataChannel>)
+        void dcctrl_close(boost::shared_ptr<DataChannelImpl>)
         {
 
         }
