@@ -21,11 +21,19 @@ public:
     virtual sctp::AssociationBase* getAssociationBase() = 0;
 };
 
+struct DataChannelOpt
+{
+    bool        ordered_;
+    int         sid_;//-1 means not specified
+    int         retrans_;//-1 means reliable
+    std::string label_;
+    std::string protocol_;
+};
+
 //datachannel interface
-class DataChannel
+class DataChannel : public DataChannelOpt
 {
 protected:
-    unsigned short  sid_;
     DataChannel();
 public:
 

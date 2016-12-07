@@ -15,12 +15,12 @@ namespace rtcdc { namespace sctp{
 
 SocketCore::~SocketCore(){}
 
-class SCTPDemultiplexFail : std::runtime_error
+class SCTPDemultiplexFail : std::invalid_argument
 {
     unsigned short port_;
 public:
     SCTPDemultiplexFail(unsigned short p) : 
-        std::runtime_error("Not existed SCTP port"), port_(p){}
+        std::invalid_argument("Not existed SCTP port"), port_(p){}
 };
 
 namespace _concept{
