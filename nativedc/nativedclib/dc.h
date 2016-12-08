@@ -10,6 +10,7 @@ namespace boost { namespace asio { class io_service; } }
 
 namespace rtcdc
 {
+    namespace sctp { class SocketCore; }
 class DatachannelCoreCall;
 
 //the transport core for datachannel, which will bound to a

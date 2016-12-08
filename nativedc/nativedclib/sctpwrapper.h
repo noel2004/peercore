@@ -23,7 +23,7 @@ namespace rtcdc
         {
             //here we use SYNC api ...
             boost::system::error_code ec;
-            lowLevelTransLayer_.send(buf, 0, ec);
+            lowLevelTransLayer_.send(boost::asio::buffer(buf), 0, ec);
             return !ec ? 0 : ec.value();
         }
 
@@ -51,7 +51,7 @@ namespace rtcdc
         SCTP_Association(Layer& l) : lowLevelTransLayer_(l), runFlag_(false){}
         ~SCTP_Association(){}
 
-        const char*     layerName() override
+        const char*     layerName() const override
         {
             static const char n[] = "SCTP Association basic layer";
             return n;

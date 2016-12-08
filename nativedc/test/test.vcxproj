@@ -87,14 +87,14 @@
       </PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(SolutionDir)..\vendor\glog\src\windows;$(SolutionDir)..\vendor\gtest\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;GOOGLE_GLOG_DLL_DECL=;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)..\vendor\win\include;$(SolutionDir)..\vendor\usrsctp;$(SolutionDir)..\vendor\glog\src\windows;$(SolutionDir)..\vendor\gtest\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(SolutionDir)..\vendor\win\lib</AdditionalLibraryDirectories>
-      <AdditionalDependencies>gtestd.lib;usrsctpd.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)..\vendor\win\lib;$(SolutionDir)..\vendor\win\lib\boostlib</AdditionalLibraryDirectories>
+      <AdditionalDependencies>gtestd.lib;usrsctpd.lib;libglogd.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -118,16 +118,16 @@
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(SolutionDir)..\vendor\glog\src\windows;$(SolutionDir)..\vendor\gtest\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;GOOGLE_GLOG_DLL_DECL=;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)..\vendor\win\include;$(SolutionDir)..\vendor\usrsctp;$(SolutionDir)..\vendor\glog\src\windows;$(SolutionDir)..\vendor\gtest\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(SolutionDir)..\vendor\win\lib</AdditionalLibraryDirectories>
-      <AdditionalDependencies>gtest.lib;usrsctp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)..\vendor\win\lib;$(SolutionDir)..\vendor\win\lib\boostlib</AdditionalLibraryDirectories>
+      <AdditionalDependencies>gtest.lib;usrsctp.lib;libglog.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -151,7 +151,16 @@
     <Text Include="ReadMe.txt" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="sctp_t.cpp" />
     <ClCompile Include="test.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\nativedclib\nativedclib.vcxproj">
+      <Project>{5025a4d8-02fa-4568-9071-7f67ba4003d4}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\stun\stun.vcxproj">
+      <Project>{33b1813f-bc8e-49ef-a2b1-3389edefd286}</Project>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

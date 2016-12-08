@@ -1,20 +1,24 @@
 #define GLOG_NO_ABBREVIATED_SEVERITIES
 #include "dc.h"
 #include "dctransport.h"
+#include "sctp.h"
 #include "usrsctplib/usrsctp.h"
 #include "glog/logging.h"
 #include <boost/asio.hpp>
 #include <boost/bind.hpp>
-#include <boost/thread.hpp>
 #include <boost/enable_shared_from_this.hpp>
-#include <map>
+#include <unordered_map>
 #include <exception>
 
 namespace {
     //DataChannel constants: 
     const unsigned int DATA_CHANNEL_PPID_CONTROL = 50;
     const unsigned int DATA_CHANNEL_PPID_DOMSTRING = 51;
-    const unsigned int DATA_CHANNEL_PPID_BINARY = 52;
+    const unsigned int DATA_CHANNEL_PPID_PARTIAL_BINARY = 52;//WebRTC "Binary Partial", deprecated
+    const unsigned int DATA_CHANNEL_PPID_PARTIAL_DOMSTRING = 54;//WebRTC "String partial", deprecated
+    const unsigned int DATA_CHANNEL_PPID_BINARY = 53;
+    const unsigned int DATA_CHANNEL_PPID_EMPTY_STRING = 56;
+    const unsigned int DATA_CHANNEL_PPID_EMPTY_BINARY = 57;
 
     const unsigned short  DATA_CHANNEL_CLOSED = 0;
     const unsigned short  DATA_CHANNEL_CONNECTING = 1;
@@ -53,7 +57,7 @@ namespace {
 	    uint16_t flags;
 	    uint16_t reliability_params;
 	    int16_t priority;
-	    char label[];
+//	    char label[];
     } DC_PACKED;
 
     struct rtcweb_datachannel_open_msg {
@@ -63,7 +67,7 @@ namespace {
 	    int16_t priority;
         uint16_t laben_len;
         uint16_t protocol_len;
-	    char label_protocol[];
+//	    char label_protocol[];
     } DC_PACKED;
 
     struct rtcweb_datachannel_open_response {
@@ -97,7 +101,7 @@ namespace {
         static std::string dump(rtcweb_datachannel_open_msg*);
     public:
         template<class T>
-        DC_Invalid_Request(T* p) : std::invalid_argument(dump(p)) explicit{}
+        explicit DC_Invalid_Request(T* p) : std::invalid_argument(dump(p)){}
         DC_Invalid_Request(size_t /*len*/, size_t /*expect*/) 
             : std::invalid_argument("Unexpected open request size")
         {}
@@ -105,6 +109,7 @@ namespace {
 
     class DataChannelImpl : public DataChannel, boost::noncopyable
     {
+        struct   socket *sctp_socket_;
         uint16_t sctp_pr_policy_;
         bool     updateChnType(uint8_t chntype)
         {
@@ -130,13 +135,14 @@ namespace {
 
         const bool jesup_compatible_;
 
-        DataChannelImpl() : jesup_compatible_(false) /*not care the flag for initiator*/
+        DataChannelImpl() : jesup_compatible_(false), sctp_socket_(nullptr)
+            /*not care the flag for initiator*/
         {
 
         }
 
         DataChannelImpl(struct rtcweb_datachannel_open_request* p, size_t len) throw(DC_Invalid_Request)
-        : jesup_compatible_(true){
+        : jesup_compatible_(true), sctp_socket_(nullptr){
             if (len < sizeof(struct rtcweb_datachannel_open_request))
                 throw DC_Invalid_Request(len, sizeof(struct rtcweb_datachannel_open_request));
 
@@ -144,19 +150,20 @@ namespace {
         }
 
         DataChannelImpl(struct rtcweb_datachannel_open_msg* p, size_t len) throw(DC_Invalid_Request)
-        : jesup_compatible_(false)
+        : jesup_compatible_(false), sctp_socket_(nullptr)
         {
 
         }
+
+        void    setSocket(struct socket* s) { sctp_socket_ = s; }
     };
 
     class DataChannelCoreImpl : DatachannelCoreCall, 
         public boost::enable_shared_from_this<DataChannelCoreImpl>
     {
-        boost::shared_mutex dc_index_lock_;
-        typedef boost::shared_lock<boost::shared_mutex> read_lock;
-        typedef boost::upgrade_lock<boost::shared_mutex> write_lock;
-        std::vector<boost::shared_ptr<DataChannel> > dc_index_;//maxium 64k
+        std::unordered_map<unsigned short, boost::shared_ptr<DataChannelImpl> > dc_index_;
+
+        boost::shared_ptr<sctp::SocketCore>          bind_socket_;
 
         void    onAssocError(const std::string& reason, bool closed) final 
         {
@@ -179,92 +186,106 @@ namespace {
         void    onDCMessage(unsigned short sid, unsigned int ppid, 
             const boost::asio::mutable_buffer& buffer, void (*freebuffer)(void*)) final 
         {
-            auto takep = [this](unsigned short sid)
-                -> boost::shared_ptr<DataChannel>
+            auto ref = shared_from_this();
+            io_srv_.post([this, sid, ppid, buffer, freebuffer, ref]()
             {
-                try{
-                    read_lock guard(dc_index_lock_);                
-                    return dc_index_[sid];
-                }
-                catch (boost::lock_error& e)
-                {
-                    LOG(ERROR) << "Get read lock fail! lost message for [" << sid <<"]: "
-                        <<e.what()<< std::endl;
-                }
-                return nullptr;
-            };
-            auto p = takep(sid);
-            
-            //deliver to dc ....
-            auto buffersz = boost::asio::buffer_size(buffer);
-            switch (ppid) {
-            case DATA_CHANNEL_PPID_CONTROL:
-                if (buffersz < sizeof(rtcweb_datachannel_ack))
-                {
-                    VLOG_EVERY_N(3, 128) << "Receive invalid message for DC Control: size is "
-                        << boost::asio::buffer_size(buffer) <<" bytes" << std::endl;
-                    return;
-                }
+                boost::shared_ptr<DataChannelImpl> p;
+                auto f = dc_index_.find(sid);
+                if (f != dc_index_.end())p = f->second;
+                auto buffersz = boost::asio::buffer_size(buffer);
 
-                auto msg_type = *boost::asio::buffer_cast<uint8_t*>(buffer);
-                switch(msg_type){
-                //try to support both old draft-rtcweb-data-protocol (jesup ver.) and the renewed one (rtcweb)
-                case DATA_CHANNEL_OPEN_NEW:
-                case DATA_CHANNEL_OPEN_REQUEST:
-                    if (!!p) {
-                        LOG(ERROR) << "channel " << sid << " has existed " << std::endl;
-                        //cancel the exist channel
-                        io_srv_.post(boost::bind(&DataChannelCoreImpl::dcctrl_close,
-                            shared_from_this(), p));
+                switch (ppid) {
+                case DATA_CHANNEL_PPID_CONTROL:
+                    if (buffersz < sizeof(rtcweb_datachannel_ack))
+                    {
+                        VLOG_EVERY_N(3, 128) << "Receive invalid message for DC Control: size is "
+                            << boost::asio::buffer_size(buffer) <<" bytes" << std::endl;
+                        return;
                     }
-                    else {
-                        try {
-                            p = boost::shared_ptr<DataChannelImpl>(
-                                msg_type == DATA_CHANNEL_OPEN_REQUEST ?
-                                new DataChannelImpl(boost::asio::buffer_cast<struct rtcweb_datachannel_open_request*>(buffer), buffersz) :
-                                new DataChannelImpl(boost::asio::buffer_cast<struct rtcweb_datachannel_open_msg*>(buffer), buffersz) );
-                            io_srv_.post(boost::bind(&DataChannelCoreImpl::dcctrl_open,
-                                shared_from_this(), p));
+
+                    switch(*boost::asio::buffer_cast<uint8_t*>(buffer)){
+                    //try to support both old draft-rtcweb-data-protocol (jesup ver.) and the renewed one (rtcweb)
+                    case DATA_CHANNEL_OPEN_NEW:
+                    case DATA_CHANNEL_OPEN_REQUEST:
+                        if (!!p) {
+                            LOG(ERROR) << "channel " << sid << " has existed " << std::endl;
+                            //cancel the exist channel
+                             dcctrl_close(p);
                         }
-                        catch (DC_Invalid_Request& e)
+                        else {
+                            try {
+                                p = boost::shared_ptr<DataChannelImpl>(
+                                    *boost::asio::buffer_cast<uint8_t*>(buffer) == DATA_CHANNEL_OPEN_REQUEST ?
+                                    new DataChannelImpl(boost::asio::buffer_cast<struct rtcweb_datachannel_open_request*>(buffer), buffersz) :
+                                    new DataChannelImpl(boost::asio::buffer_cast<struct rtcweb_datachannel_open_msg*>(buffer), buffersz) );
+                                 dcctrl_open(p);
+                            }
+                            catch (DC_Invalid_Request& e)
+                            {
+                                LOG(ERROR) << "handle datachannel open request fail: "
+                                    << e.what() << std::endl;
+                                break;
+                            }
+                        }
+                        break;
+                    case DATA_CHANNEL_OPEN_RESPONSE:
+                    {
+                        auto pmsg = boost::asio::buffer_cast<struct rtcweb_datachannel_open_response*>(buffer);
+                        //error and flag in response is TBD. and not used
+                        if (pmsg->reverse_stream == sid ? !p : (f =  dc_index_.find(pmsg->reverse_stream), 
+                                p = f ==  dc_index_.end() ? nullptr : f->second, !p)) {
+                            LOG(ERROR) << "channel " << sid << " has no match for open_resp " << std::endl;
+                            //just ignore ...
+                        }
+                        else {
+                             dcctrl_open_ack(p);
+                        }
+                    }
+                        break;
+                    case DATA_CHANNEL_ACK:
+                        if (!p)
                         {
-                            LOG(ERROR) << "handle datachannel open request fail: "
-                                << e.what() << std::endl;
-                            break;
+                            LOG(ERROR) << "channel " << sid << " has no match for open_ack " << std::endl;
+                        }else
+                        {
+                             dcctrl_open_ack(p);
                         }
+                        break;
+                    default:
+                        break;
                     }
+
                     break;
-                case DATA_CHANNEL_OPEN_RESPONSE:
-                {
-                    auto pmsg = boost::asio::buffer_cast<struct rtcweb_datachannel_open_response*>(buffer);
-                    //error and flag in response is TBD. and not used
-                    if (pmsg->reverse_stream == sid || (p = takep(pmsg->reverse_stream), !p)) {
-                        LOG(ERROR) << "channel " << sid << " has no match for open_resp " << std::endl;
-                        //just ignore ...
-                    }
-                    else {
-                        io_srv_.post(boost::bind(&DataChannelCoreImpl::dcctrl_open_ack,
-                            shared_from_this(), p));
-                        //should also send an ack
-                    }
-                }
-                    break;
-                case DATA_CHANNEL_ACK:
+                case DATA_CHANNEL_PPID_DOMSTRING:
+                case DATA_CHANNEL_PPID_PARTIAL_DOMSTRING:
                     if (!p)
                     {
                         LOG(ERROR) << "channel " << sid << " has no match for open_ack " << std::endl;
                     }else
                     {
-                        io_srv_.post(boost::bind(&DataChannelCoreImpl::dcctrl_open_ack,
-                            shared_from_this(), p));
+                        dcctrl_open_ack(p);
                     }
                     break;
+                case DATA_CHANNEL_PPID_PARTIAL_BINARY:
+                case DATA_CHANNEL_PPID_BINARY:
+                    if (!p)
+                    {
+                        LOG(ERROR) << "channel " << sid << " has no match for open_ack " << std::endl;
+                    }else
+                    {
+                        dcctrl_open_ack(p);
+                    }
+                    break;
+                case DATA_CHANNEL_PPID_EMPTY_STRING:
+                case DATA_CHANNEL_PPID_EMPTY_BINARY:
+                    break;
                 default:
+                    LOG(ERROR) << "Channel " << sid << "get unspecified ppid " << ppid << std::endl;
                     break;
                 }
 
-                break;
-            }
+            }//end of lambda
+            );
 
         }
 
@@ -272,6 +293,7 @@ namespace {
 
         void dcctrl_open(boost::shared_ptr<DataChannelImpl> p)
         {
+            p->setSocket(reinterpret_cast<struct socket*>(bind_socket_->nativeHandle()));
         }
 
         void dcctrl_open_ack(boost::shared_ptr<DataChannelImpl>)
@@ -286,9 +308,7 @@ namespace {
 
     public:
         DataChannelCoreImpl(boost::asio::io_service& ios) : io_srv_(ios)
-        {
-            dc_index_.assign(65535, nullptr);
-        }
+        {}
     };
 
 }

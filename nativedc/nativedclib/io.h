@@ -17,7 +17,7 @@ namespace rtcdc
     };
 
     //additional wrapping for boost::asio::ip::udp::socket
-    class asio_socketwrapper : boost::asio::ip::udp::socket
+    class asio_socketwrapper : public boost::asio::ip::udp::socket
     {
         bool    use_v4_;    //flag set when working under ipv4     
 
