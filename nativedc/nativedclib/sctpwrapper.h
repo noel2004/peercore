@@ -12,7 +12,7 @@ namespace rtcdc
 {
 
     template<class Layer>
-    class SCTP_Association : sctp::AssociationBase, 
+    class SCTP_Association : public sctp::AssociationBase, 
         public boost::enable_shared_from_this<SCTP_Association<Layer> >
     {
         Layer   &lowLevelTransLayer_;
