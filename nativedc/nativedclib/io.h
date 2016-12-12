@@ -20,10 +20,12 @@ namespace rtcdc
     class asio_socketwrapper : public boost::asio::ip::udp::socket
     {
         bool    use_v4_;    //flag set when working under ipv4     
+        bool    binded_;
+        boost::asio::ip::udp::endpoint bind_ep_;
 
     public:
         asio_socketwrapper(boost::asio::io_service& ios) : 
-            boost::asio::ip::udp::socket(ios), use_v4_(false){}
+            boost::asio::ip::udp::socket(ios), use_v4_(false), binded_(false){}
         ~asio_socketwrapper(){}
 
         typedef boost::asio::ip::udp::socket socket_type;
@@ -45,6 +47,36 @@ namespace rtcdc
             use_v4_ = true;
             socket_type::open(socket_type::protocol_type::v4(), ec);
 
+        }
+
+        //we adapt async_receive, and bind the dest ip automatically in first receive
+        template<typename MutableBufferSequence, typename ReadHandler>
+        void async_receive(const MutableBufferSequence & buffers, const ReadHandler &handler)
+        {
+            if (binded_) {
+                boost::asio::ip::udp::socket::async_receive(buffers, handler);
+            }
+            else {
+                boost::asio::ip::udp::socket::async_receive_from(
+                    buffers, bind_ep_,
+                    [this/*so we suppose the super class MUST refer us*/, 
+                    handler](const boost::system::error_code& ec, std::size_t bytes_tran)
+                    {
+                        if (!ec)
+                        {
+                            boost::system::error_code ecc;
+                            boost::asio::ip::udp::socket::connect(bind_ep_, ecc);
+                            if (!ecc)binded_ = true;
+                            else{
+                                handler(ecc, bytes_tran);
+                                return;
+                            }
+                        }
+                        
+                        handler(ec, bytes_tran);
+                    }
+                );
+            }
         }
 
         void    prepare(boost::system::error_code& ec, unsigned short port = 0)

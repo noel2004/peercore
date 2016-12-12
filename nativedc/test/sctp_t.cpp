@@ -72,6 +72,7 @@ namespace {
         ASSERT_TRUE(!ec);
 
         auto sctpsock = rtcdc::sctp::SocketCore::createSocketCore(assocbase.get(), sctpport);
+        ASSERT_TRUE(!!sctpsock);
         auto sink = boost::shared_ptr<Server_MessageSink>(new Server_MessageSink);
 
         const unsigned short peerport = 1888;

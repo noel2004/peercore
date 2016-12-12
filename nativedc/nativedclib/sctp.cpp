@@ -302,19 +302,27 @@ public:
             && pnotify->sn_header.sn_type == SCTP_ASSOC_CHANGE 
             && pnotify->sn_assoc_change.sac_state == SCTP_COMM_UP)
         {
-            auto ps = usrsctp_accept(usrsctp_sock_, NULL, NULL);
-            if (ps != nullptr)
-            {
-                //no need to check the incoming address ...
-                LOG(INFO) << "sctp socket accept the incoming one" << std::endl;
-                have_accepted_ = true;
+            
+            //when callback is set, the incoming sock has been the new created socket
+            //and usrscpt_accept MUST NOT call (or you will be hung for waiting another
+            //incoming socket)
+            //auto ps = usrsctp_accept(usrsctp_sock_, NULL, NULL);
+            //if (ps == nullptr)
+            //{
+            //    LOG(ERROR) << "sctp socket accept fail: "<< errno << std::endl;
+            //    return true;
+            //}
 
-                auto old_del = usrsctp_sock_;
-                usrsctp_sock_ = ps;
+            //no need to check the incoming address ...
+            LOG(INFO) << "sctp socket accept the incoming one" << std::endl;
+            have_accepted_ = true;
 
-                usrsctp_set_ulpinfo(old_del, nullptr);
-                usrsctp_close(old_del);
-            }
+            auto old_del = usrsctp_sock_;
+            usrsctp_sock_ = sock;
+
+            usrsctp_set_ulpinfo(old_del, nullptr);
+   //         usrsctp_close(old_del);
+
         }
 
         //continue handling ...
@@ -347,14 +355,12 @@ boost::shared_ptr<SocketCore>   SocketCore::createSocketCore(
     if (one_to_one)
     {
         auto p = boost::shared_ptr<SingleSocketCore>(new SingleSocketCore());
-        p->init(pbase, port);
-        pret = p;
+        if(p->init(pbase, port))pret = p;
     }
     else
     {
         auto p = boost::shared_ptr<CollectionSocketCore>(new CollectionSocketCore());
-        p->init(pbase, port);
-        pret = p;
+        if(p->init(pbase, port))pret = p;
     }
 
     return pret;
