@@ -48,13 +48,15 @@ namespace rtcdc
         {
         public:
             virtual ~SocketCore();
-            virtual void*   nativeHandle() = 0;
             virtual bool    oneToManyMode() const = 0;
             //socket for AF_CONN type can only distinguish associations by their ports
             //(all assoc's addrs are identify), port = 0 indicate remove a entry
             //if socket is under one-to-one mode, only one DCCall can be added
             virtual bool    addEntry(unsigned short port, 
                 boost::shared_ptr<DatachannelCoreCall>) = 0;
+            //For DatachannelCore, after AssocOpened is called, fix the session
+            //and acquire a nativehandle for written
+            virtual void*   establish() = 0;
             //for one-to-many mode:
             virtual boost::shared_ptr<SocketCore>   peeloff() = 0;
 

@@ -293,7 +293,7 @@ namespace {
 
         void dcctrl_open(boost::shared_ptr<DataChannelImpl> p)
         {
-            p->setSocket(reinterpret_cast<struct socket*>(bind_socket_->nativeHandle()));
+            p->setSocket(reinterpret_cast<struct socket*>(bind_socket_->establish()));
         }
 
         void dcctrl_open_ack(boost::shared_ptr<DataChannelImpl>)

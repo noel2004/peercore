@@ -169,6 +169,11 @@ public:
                 LOG(ERROR) << "set opt - enable rcvinfo fail: " << errno << std::endl;
                 break;
             }
+
+            if (usrsctp_set_non_blocking(usrsctp_sock_, opt_on) < 0) {
+                LOG(ERROR) << "set opt - enable non-blocking fail: " << errno << std::endl;
+                break;
+            }
 	        //if (usrsctp_setsockopt(usrsctp_sock_, IPPROTO_SCTP, SCTP_EXPLICIT_EOR, &opt_on, sizeof(int)) < 0) {
          //       LOG(ERROR) << "set opt - enable explicit EOR fail: " << errno << std::endl;
          //       break;
@@ -237,7 +242,6 @@ public:
         }
     }
 
-    void*   nativeHandle() override{return usrsctp_sock_;}
     bool    oneToManyMode() const override{return !is_one_to_one_;}
 };
 
@@ -265,6 +269,8 @@ public:
         //TODO
         return false;
     }
+
+    void*   establish() override{return usrsctp_sock_;}
 
     boost::shared_ptr<SocketCore>   peeloff() final
     {
@@ -296,37 +302,44 @@ public:
         if (have_accepted_)return sock != usrsctp_sock_;//double-checking 
 
         auto pnotify = (union sctp_notification *) (data);
-
         //only check assoc setup event ...
         if (data != nullptr && (flags & MSG_NOTIFICATION) != 0
-            && pnotify->sn_header.sn_type == SCTP_ASSOC_CHANGE 
+            && pnotify->sn_header.sn_type == SCTP_ASSOC_CHANGE
             && pnotify->sn_assoc_change.sac_state == SCTP_COMM_UP)
         {
-            
-            //when callback is set, the incoming sock has been the new created socket
-            //and usrscpt_accept MUST NOT call (or you will be hung for waiting another
-            //incoming socket)
-            //auto ps = usrsctp_accept(usrsctp_sock_, NULL, NULL);
-            //if (ps == nullptr)
-            //{
-            //    LOG(ERROR) << "sctp socket accept fail: "<< errno << std::endl;
-            //    return true;
-            //}
-
-            //no need to check the incoming address ...
             LOG(INFO) << "sctp socket accept the incoming one" << std::endl;
+            //continue handling ...
+            return false;
+        }
+        
+        //omit the messages!
+        return true;
+    }
+
+    void*   establish() override
+    {
+        auto old_del = usrsctp_sock_;
+
+        {
+            boost::mutex::scoped_lock   guard(accept_lock_);
+            if(have_accepted_)return usrsctp_sock_;
+
+            auto ps = usrsctp_accept(usrsctp_sock_, NULL, NULL);
+            if (ps == nullptr)
+            {
+                LOG(ERROR) << "sctp socket accept fail: "<< errno << std::endl;
+                return nullptr;
+            }
+
+            usrsctp_sock_ = ps;
             have_accepted_ = true;
-
-            auto old_del = usrsctp_sock_;
-            usrsctp_sock_ = sock;
-
-            usrsctp_set_ulpinfo(old_del, nullptr);
-   //         usrsctp_close(old_del);
-
         }
 
-        //continue handling ...
-        return false;
+        //don't lock when socket is closed ...
+        usrsctp_set_ulpinfo(old_del, nullptr);
+        usrsctp_close(old_del);
+
+        return usrsctp_sock_;
     }
 
     bool    addEntry(unsigned short port, boost::shared_ptr<DatachannelCoreCall> cb) final
