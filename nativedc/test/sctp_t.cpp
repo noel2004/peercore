@@ -21,7 +21,7 @@ namespace {
             rtcdc::sctp::Module::Init();
         }
         void TearDown() override{
-            rtcdc::sctp::Module::Init(true);
+//            rtcdc::sctp::Module::Init(true);
         }
     };
 
@@ -29,6 +29,7 @@ namespace {
     {
     public:
         boost::function<void()> onAssocOpened_;
+        boost::function<void()> onAssocClosed_;
 
         void    onAssocError(const std::string& reason, bool closed) override
         {
@@ -42,6 +43,7 @@ namespace {
         void    onAssocClosed() override
         {
             LOG(INFO) << "Assoc closed" << std::endl;
+            if (onAssocClosed_)onAssocClosed_();
         }
         void    onDCMessage(unsigned short sid, unsigned int ppid,
             const boost::asio::mutable_buffer& buf, void(*freebuffer)(void*)) override
@@ -83,6 +85,7 @@ namespace {
             auto sink = boost::shared_ptr<Server_MessageSink>(new Server_MessageSink);
             auto festablish = [sock]() {sock->establish(); };
             sink->onAssocOpened_ = [festablish, this]() {iosrv_.post(festablish);};
+            sink->onAssocClosed_ = [this]() {iosrv_.stop();};
 
             const unsigned short peerport = 1888;
             LOG(INFO) << "please set peer's sctp port to " << peerport << std::endl;
@@ -92,14 +95,19 @@ namespace {
             sock->addEntry(0, sink);
         }
 
-        assocbase->stop();
-
+//        sock->close();
         sock.reset();
-        assocbase.reset();
+//        assocbase->stop();
+        //auto p = new boost::asio::io_service::work(iosrv_);
+        //iosrv_.reset();
+        //iosrv_.run();
 
-        boost::asio::deadline_timer dt(iosrv_);
-        dt.expires_from_now(boost::posix_time::seconds(10000));
-        dt.wait();
+        assocbase->clear();
+        assocbase.reset();
+        
+
+
+        rtcdc::sctp::Module::Init(true);
     }
 
 }

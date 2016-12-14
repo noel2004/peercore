@@ -27,6 +27,7 @@ namespace rtcdc
 
             virtual ~AssociationBase();
 
+            void    clear();
         };
 
         class Module
@@ -59,6 +60,8 @@ namespace rtcdc
             virtual void*   establish() = 0;
             //for one-to-many mode:
             virtual boost::shared_ptr<SocketCore>   peeloff() = 0;
+
+            virtual void    close() = 0;
 
             static boost::shared_ptr<SocketCore>   createSocketCore(
                 AssociationBase*, unsigned short port, bool one_to_one = true);

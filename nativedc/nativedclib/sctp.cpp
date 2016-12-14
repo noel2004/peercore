@@ -205,6 +205,17 @@ public:
 		        }
             }
 
+            //some optional ...
+            {
+                struct linger lgopt = { 0 };
+                lgopt.l_linger = 0;
+                lgopt.l_onoff = 1;
+	            if (usrsctp_setsockopt(usrsctp_sock_, SOL_SOCKET, SO_LINGER, &lgopt, sizeof(lgopt)) < 0) {
+                    LOG(WARNING) << "set opt SO LINGER fail: "<< errno 
+                        << ", could not abort socket when close! "<< std::endl;
+                }
+            }
+
             //backlog = 1 can be applied to any mode
             if (usrsctp_listen(usrsctp_sock_, 1) < 0)
             {
@@ -276,6 +287,8 @@ public:
     {
         return nullptr;
     }
+
+    void    close() final{}
 };
 
 class SingleSocketCore : public SocketCoreImpl<SingleSocketCore>
@@ -315,6 +328,7 @@ public:
         //omit the messages!
         return true;
     }
+    void    close() final { usrsctp_shutdown(usrsctp_sock_, SHUT_WR); }
 
     void*   establish() override
     {
@@ -387,6 +401,11 @@ AssociationBase::AssociationBase()
 }
 
 AssociationBase::~AssociationBase()
+{
+//    usrsctp_deregister_address(this);
+}
+
+void     AssociationBase::clear()
 {
     usrsctp_deregister_address(this);
 }
